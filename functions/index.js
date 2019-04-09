@@ -53,9 +53,9 @@ exports.generateToken = functions.https.onCall(
     (data, context) => {
         console.log(data);
         console.log(context.auth);
-        return {data: '112233'};
-        // const user = request.auth.user;
-        // const amount = request.body.amount;
+        // return {data: '112233'};
+        const request_uid = context.auth.uid;
+        const amount = data.amount;
         // const received_secret = request.body.secret;
         // console.log(`User UID is ${user.uid} name is ${user.displayName} is requesting for a token of amount: ${request.body.amount}`);
         // const userDocumentPromise = admin.firestore().doc(`users/${user.uid}`).get();
