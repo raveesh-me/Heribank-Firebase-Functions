@@ -118,7 +118,7 @@ export const redeemToken = functions.https.onCall(
     }
 );
 
-export const fulfillTransaction = functions.firestore.document('pending_transactions/{$transactionId}').onCreate(
+export const fulfillTransaction = functions.firestore.document('pending_transactions/{transactionId}').onCreate(
     async (snapshot, context) => {
         console.log(snapshot.data);
 
