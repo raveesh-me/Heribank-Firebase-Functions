@@ -32,33 +32,51 @@ export const addUserToFireStore = functions.auth.user().onCreate(
 export const generateToken = functions.https.onCall(
     async (data, context) => {
         console.log(data);
-        console.log(context.auth);
 
         // If auth is null, return error
         if (!context.auth) {
-            return new Error("Can't generate token on null authentication")
+            return {
+                status: "error",
+                message: "Can't generate token on null authentication",
+            }
         }
+        console.log(context.auth);
+
 
         const userDocumentSnapshot = await admin.firestore().doc(`users/${context.auth.uid}`).get()
-        console.log(`user doccument snapshot data`);
-        console.log(userDocumentSnapshot.data());
 
         if (!userDocumentSnapshot.data) {
             // This should never be null because uid exists and has been authorised.
-            return new Error("Someting went terribly wrong, contact your bank admins immediately")
+            return {
+                status: "error",
+                message: "Someting went terribly wrong, contact your bank admins immediately",
+            }
         }
+
+        console.log(`user doccument snapshot data`);
+        console.log(userDocumentSnapshot.data());
+
 
         const doccumentData = userDocumentSnapshot.data() as any;
 
         // check if secrets match
         if (data.secret_pin !== doccumentData.secret_pin) {
-            return new Error("Secret pin does not match. You should not try to steal other people's money")
+            return {
+                status: "error",
+                message: "Secret pin does not match. You should not try to steal other people's money",
+            }
         }
+        console.log('Secret pins match');
 
         // At this point the auth exists, and secrets match. Now we check for sufficient balance
         if (doccumentData.balance < data.amount) {
-            return new Error("People spending more than they have in their account is the recipe for economic cricis");
+            console.log('balance not enough');
+            return {
+                status: "error",
+                message: "People spending more than they have in their account is the recipe for economic cricis",
+            }
         }
+        console.log('all check, generating token...');
 
         // Now we are sure that we can generate the token.
         const tokenString = makeId(4);
@@ -128,7 +146,7 @@ export const fulfillTransaction = functions.firestore.document('pending_transact
         const receiver = transaction.receiver;
         const sender = transaction.token.sender;
         const token = transaction.token;
-        
+
         //reduce the amount from sender's account
         await admin.firestore().doc(`users/${sender.uid}`).update({
             balance: admin.firestore.FieldValue.increment(-1 * token.amount)
@@ -154,7 +172,7 @@ export const fulfillTransaction = functions.firestore.document('pending_transact
         await admin.firestore().doc(`fulfilled_transactions/${transactionId}`).set(transaction);
         await admin.firestore().doc(`users/${sender.uid}/fulfilled_transactions/${transactionId}`).set(transaction);
         await admin.firestore().doc(`users/${receiver.uid}fulfilled_transactions/${transactionId}`).set(transaction);
-        
+
         //return deleting transaction from pending transactions
         return admin.firestore().doc(`pending_transactions/${transactionId}`).delete();
 
@@ -164,7 +182,7 @@ export const fulfillTransaction = functions.firestore.document('pending_transact
 
 export const expireToken = functions.firestore.document('tokens/{tokenID}').onCreate(
     async (snap, context) => {
-        
+
 
         const token: any = snap.data;
         const tokenDocumentId = snap.id;
@@ -173,8 +191,8 @@ export const expireToken = functions.firestore.document('tokens/{tokenID}').onCr
 
             // check if the token has already been deleted. If yes, then return early
             const tokenDocumentSnaoshotAfterFiveMinutes = await admin.firestore().doc(`tokens/${tokenDocumentId}`).get();
-            if(!tokenDocumentSnaoshotAfterFiveMinutes.exists){
-                return {message : "The token has already been deleted, transaction could have been completed"}
+            if (!tokenDocumentSnaoshotAfterFiveMinutes.exists) {
+                return { message: "The token has already been deleted, transaction could have been completed" }
             }
 
             // add the token to expired token
@@ -182,10 +200,11 @@ export const expireToken = functions.firestore.document('tokens/{tokenID}').onCr
                 token: token
             });
 
-            return admin.firestore().doc(`tokens/${tokenDocumentId}`).delete();
+             await admin.firestore().doc(`tokens/${tokenDocumentId}`).delete();
+             return true;
 
-        }, 
-        5 * 60 * 1000) // wait for 5 minutes before calling the function
-        
+        },
+            5 * 60 * 1000) // wait for 5 minutes before calling the function
+
     }
 );
