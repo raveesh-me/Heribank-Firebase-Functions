@@ -4,6 +4,7 @@ import * as admin from 'firebase-admin';
 admin.initializeApp();
 
 function makeId(length: number): string {
+    // This is an internal function responsible for making radom IDs of specified lengths
     let text = '';
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
@@ -14,7 +15,9 @@ function makeId(length: number): string {
     return text;
 }
 
+
 export const addUserToFireStore = functions.auth.user().onCreate(
+    // This is an auth based trigger that, on new accounts being made, adds the user to the database
     (user) => {
         console.log(user.displayName)
         return admin.firestore().doc(`users/${user.uid}`).set({
@@ -30,6 +33,10 @@ export const addUserToFireStore = functions.auth.user().onCreate(
 
 
 export const generateToken = functions.https.onCall(
+    // This is a https based onCall trigger.
+    // This contains input data as well as authentication context
+    // This means we can verify the user as well as get data
+
     async (data, context) => {
         console.log(data);
 
@@ -40,13 +47,14 @@ export const generateToken = functions.https.onCall(
                 message: "Can't generate token on null authentication",
             }
         }
-        console.log(context.auth);
 
+        console.log(context.auth);
 
         const userDocumentSnapshot = await admin.firestore().doc(`users/${context.auth.uid}`).get()
 
         if (!userDocumentSnapshot.data) {
-            // This should never be null because uid exists and has been authorised.
+            // This error should not happen.
+            // User Snapshot Data should never be null because uid exists and has been authorised.
             return {
                 status: "error",
                 message: "Someting went terribly wrong, contact your bank admins immediately",
@@ -57,6 +65,7 @@ export const generateToken = functions.https.onCall(
         console.log(userDocumentSnapshot.data());
 
 
+        // typecasting to a generic object to be able to use this as a map later
         const doccumentData = userDocumentSnapshot.data() as any;
 
         // check if secrets match
@@ -137,6 +146,13 @@ export const redeemToken = functions.https.onCall(
 );
 
 export const fulfillTransaction = functions.firestore.document('pending_transactions/{transactionId}').onCreate(
+    // This is the pending transaction fulfillment responsible for:
+        // Deducting amount from sender
+        // Adding amount to receiver
+        // Adding transaction to bank's records
+        // Adding transaction to sender's records
+        // Adding transaction to receiver's records
+
     async (snapshot, context) => {
         console.log(snapshot.data);
 
@@ -180,31 +196,32 @@ export const fulfillTransaction = functions.firestore.document('pending_transact
 );
 
 
-export const expireToken = functions.firestore.document('tokens/{tokenID}').onCreate(
-    async (snap, context) => {
+// Ideally we would expire the token after a little while but debugging this goes out of the scope of our project's timeline 
+// export const expireToken = functions.firestore.document('tokens/{tokenID}').onCreate(
+//     async (snap, context) => {
 
 
-        const token: any = snap.data;
-        const tokenDocumentId = snap.id;
+//         const token: any = snap.data;
+//         const tokenDocumentId = snap.id;
 
-        return setTimeout(async () => {
+//         return setTimeout(async () => {
 
-            // check if the token has already been deleted. If yes, then return early
-            const tokenDocumentSnaoshotAfterFiveMinutes = await admin.firestore().doc(`tokens/${tokenDocumentId}`).get();
-            if (!tokenDocumentSnaoshotAfterFiveMinutes.exists) {
-                return { message: "The token has already been deleted, transaction could have been completed" }
-            }
+//             // check if the token has already been deleted. If yes, then return early
+//             const tokenDocumentSnaoshotAfterFiveMinutes = await admin.firestore().doc(`tokens/${tokenDocumentId}`).get();
+//             if (!tokenDocumentSnaoshotAfterFiveMinutes.exists) {
+//                 return { message: "The token has already been deleted, transaction could have been completed" }
+//             }
 
-            // add the token to expired token
-            await admin.firestore().collection(`expired_tokens`).add({
-                token: token
-            });
+//             // add the token to expired token
+//             await admin.firestore().collection(`expired_tokens`).add({
+//                 token: token
+//             });
 
-             await admin.firestore().doc(`tokens/${tokenDocumentId}`).delete();
-             return true;
+//              await admin.firestore().doc(`tokens/${tokenDocumentId}`).delete();
+//              return true;
 
-        },
-            5 * 60 * 1000) // wait for 5 minutes before calling the function
+//         },
+//             5 * 60 * 1000) // wait for 5 minutes before calling the function
 
-    }
-);
+//     }
+// );
