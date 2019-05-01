@@ -36,7 +36,6 @@ export const generateToken = functions.https.onCall(
     // This is a https based onCall trigger.
     // This contains input data as well as authentication context
     // This means we can verify the user as well as get data
-
     async (data, context) => {
         console.log(data);
 
@@ -94,7 +93,6 @@ export const generateToken = functions.https.onCall(
         // await admin.firestore().doc(`users/${context.auth.uid}`).update({ balance: currentBalance - data.amount })
         await admin.firestore().doc(`tokens/${tokenString}`).set({
             amount: data.amount,
-            time_generated: Date.now(),
             token_number: tokenString,
             sender: context.auth
         })
@@ -112,17 +110,23 @@ export const redeemToken = functions.https.onCall(
 
         // If auth is null, return error
         if (!context.auth) {
-            return new Error("Can't redeem token on null authentication")
+            return {
+                status: 'ERROR',
+                message: 'Can\'t redeem token on null authentication'
+            };
         }
 
         const tokenDocumentSnapshot = await admin.firestore().doc(`tokens/${data.token}`).get();
 
         if (!tokenDocumentSnapshot.exists) {
-            return new Error("The token does not exist")
+            return {
+                status: 'ERROR',
+                message: "The token does not exist"
+            }
         }
+
         // Now the user is logged in and the token also exists. We will make a new transaction and return a success message.
         // Another service is responsible for fulfilling the transaction.  This just makes a doccument to trigger that service.
-
         const tokenData: any = tokenDocumentSnapshot.data();
 
         // add a new transaction
@@ -131,13 +135,12 @@ export const redeemToken = functions.https.onCall(
             receiver: context.auth,
         })
 
-        // move the token to redeemedTokens
+        // delete the redeemed token
+        await admin.firestore().doc(`tokens/${data.token}`).delete();
 
-        // deletion of token should take place not here, but as a part of the fulfillment process
-        // await admin.firestore().doc(`redeemed_tokens/${data.token}`).set(tokenDocumentSnapshot.data);
-        // await admin.firestore().doc(`tokens/${data.token}`).delete();
-
+        console.log("Transaction has successfully been created, will be fulfilled Shortly")
         return {
+            status: 'OK',
             message: "Transaction has successfully been created, will be fulfilled Shortly",
             transaction_id: transactionReference.id
         }
@@ -153,75 +156,66 @@ export const fulfillTransaction = functions.firestore.document('pending_transact
         // Adding transaction to sender's records
         // Adding transaction to receiver's records
 
-    async (snapshot, context) => {
-        console.log(snapshot.data);
+    async (snapshot : FirebaseFirestore.DocumentSnapshot, context) => {
+        console.log("Fulfill Transaction triggered")
 
+        // step1: extract the data from the snapshot into a typescript object
+        const document: any = snapshot.data() as any;
+        console.log(document);
+
+        // step2: identify sender and receiver
+        // step2a: identify the receiver
+        const receiver: any = document.receiver;
+        console.log(receiver);
+        console.log(`RECEIVER: ${receiver.token.name}`)
+        
+        //step2b: Identify the sender
+        const sender: any = document.token.sender;
+        console.log(sender);
+        console.log(`SENDER: ${sender.token.name}`);
+
+        // step3: identify the transaction id
         const transactionId = snapshot.id;
-        const transaction: any = snapshot.data;
+        console.log(`TRANSACTION ID: ${transactionId}`);
 
-        const receiver = transaction.receiver;
-        const sender = transaction.token.sender;
-        const token = transaction.token;
+        // step4 retreive tokenDetails
+        const token = document.token;
 
-        //reduce the amount from sender's account
+        // step5: deduct the transaction from sender and add it to sender's transactions collection as sent
         await admin.firestore().doc(`users/${sender.uid}`).update({
             balance: admin.firestore.FieldValue.increment(-1 * token.amount)
         });
 
-        // add the balance to the receiver's account
+        await admin.firestore().collection(`users/${sender.uid}/transactions`).doc(`${transactionId}`).set({
+            type: `sent`,
+            token_number: token.token_number,
+            amount: token.amount,
+            receiver: receiver,
+        });
+
+        // step6: add the money to receiver's account and add it to his transactions as received
         await admin.firestore().doc(`users/${receiver.uid}`).update({
             balance: admin.firestore.FieldValue.increment(token.amount)
         });
 
-        //move the token to redeemed tokens
-        // add the token to used tokens
-        await admin.firestore().collection(`used_tokens`).add({
-            token: token
-        })
+        await admin.firestore().collection(`users/${receiver.uid}/transactions`).doc(`${transactionId}`).set({
+            type: `received`,
+            token_number: token.token_number,
+            amount: token.amount,
+            sender: sender,
+        });
 
-        // remove the token fromm the tokens
-        await admin.firestore().doc(`tokens/${token.token_number}`).delete()
+        // step7: add the transaction to completed transactions
+        await admin.firestore().collection(`completed_transactions`).doc(`${transactionId}`).set({
+            sender: sender,
+            receiver: receiver,
+            amount: token.amount,
+            token_number: token.token_number,
+        });
 
-        //move the transaction to fulfilled transactions and individual user's transactions collections
-        //this will make writing locked down rules easier
-        // make a new transaction under fulfilled_transactions 
-        await admin.firestore().doc(`fulfilled_transactions/${transactionId}`).set(transaction);
-        await admin.firestore().doc(`users/${sender.uid}/fulfilled_transactions/${transactionId}`).set(transaction);
-        await admin.firestore().doc(`users/${receiver.uid}fulfilled_transactions/${transactionId}`).set(transaction);
-
-        //return deleting transaction from pending transactions
+        // step8: return deleting transaction from pending transactions
         return admin.firestore().doc(`pending_transactions/${transactionId}`).delete();
 
     }
 );
 
-
-// Ideally we would expire the token after a little while but debugging this goes out of the scope of our project's timeline 
-// export const expireToken = functions.firestore.document('tokens/{tokenID}').onCreate(
-//     async (snap, context) => {
-
-
-//         const token: any = snap.data;
-//         const tokenDocumentId = snap.id;
-
-//         return setTimeout(async () => {
-
-//             // check if the token has already been deleted. If yes, then return early
-//             const tokenDocumentSnaoshotAfterFiveMinutes = await admin.firestore().doc(`tokens/${tokenDocumentId}`).get();
-//             if (!tokenDocumentSnaoshotAfterFiveMinutes.exists) {
-//                 return { message: "The token has already been deleted, transaction could have been completed" }
-//             }
-
-//             // add the token to expired token
-//             await admin.firestore().collection(`expired_tokens`).add({
-//                 token: token
-//             });
-
-//              await admin.firestore().doc(`tokens/${tokenDocumentId}`).delete();
-//              return true;
-
-//         },
-//             5 * 60 * 1000) // wait for 5 minutes before calling the function
-
-//     }
-// );
