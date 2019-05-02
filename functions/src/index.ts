@@ -68,7 +68,7 @@ export const generateToken = functions.https.onCall(
         const doccumentData = userDocumentSnapshot.data() as any;
 
         // check if secrets match
-        if (data.secret_pin !== doccumentData.secret_pin) {
+        if (data.secret_pin !== doccumentData.secret_token) {
             return {
                 status: "error",
                 message: "Secret pin does not match. You should not try to steal other people's money",
